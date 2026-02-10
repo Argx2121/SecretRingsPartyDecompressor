@@ -117,7 +117,7 @@ class Decompress:
                     tex_names_len = (texture_offsets[0] - (4 * img_count + 4))
                     f.seek(start + 4 + img_count * 4)
                     texture_names = f.read(tex_names_len).decode("utf-8", "ignore").split(u"\x00")[:img_count]
-                    texture_ends = list(texture_offsets[1:0])
+                    texture_ends = list(texture_offsets[1:])
                     texture_ends.append(pathlib.Path(file).stat().st_size)
 
                     for off, end, name in zip(texture_offsets, texture_ends, texture_names):
