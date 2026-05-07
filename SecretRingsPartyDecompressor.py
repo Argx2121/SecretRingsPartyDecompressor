@@ -1,5 +1,6 @@
 import pathlib
-from struct import unpack
+from struct import unpack, pack
+import os
 
 
 class Decompress:
@@ -7,6 +8,7 @@ class Decompress:
         self.root_path = None
         self.folder_path = None
         self.files_to_check = []
+        self.bad_models = []
 
     def execute(self):
         current_dir = pathlib.Path(__file__).resolve().parent
@@ -20,6 +22,7 @@ class Decompress:
 
         for file in files:
             self.files_to_check = []
+            self.bad_models = []
             self.get_packed_files(file)
         print("Files decompressed!")
 
@@ -103,6 +106,19 @@ class Decompress:
                 magic = f.read(4).decode("utf-8", "ignore")
                 if magic == "NGIF":
                     file_name = self.get_nn_name(f, start, index)
+
+                    f.seek(start + 32)  # please stop using this system now productions
+                    obj_start = f.tell()
+                    if f.read(4).decode("utf-8", "ignore") == "NGOB":
+                        f.seek(unpack(">II", f.read(8))[1] + 4, 1)
+                        material_count, material_offset = unpack(">II", f.read(8))
+                        f.seek(obj_start + material_offset)
+                        for _ in range(material_count):
+                            a = format(unpack(">I", f.read(4))[0] >> 17, "b").count("1")
+                            if a:
+                                self.bad_models.append(file_name + ".texture_names")
+                            f.seek(4, 1)
+
                     f.close()
                     pathlib.Path(file).replace(pathlib.Path(pathlib.Path(file).parent, file_name))
                 else:  # idk prolly texture
@@ -110,15 +126,35 @@ class Decompress:
                     # SONIC RIDERS MENTION !!!!!!1!
                     f.seek(0)
                     img_count, die = unpack(">2H", f.read(4))
-                    if die:
+                    if die and not img_count:  # when the .
                         f.close()
                         continue
+                    f.seek(f.tell() + unpack(">I", f.read(4))[0] - 4)
+                    if not (f.tell() < os.path.getsize(str(file)) and f.read(4).decode("utf-8", "ignore") == "GCIX"):
+                        continue
+                    f.seek(4)
                     texture_offsets = unpack(">"+str(img_count)+"I", f.read(4*img_count))
-                    tex_names_len = (texture_offsets[0] - (4 * img_count + 4))
-                    f.seek(start + 4 + img_count * 4)
-                    texture_names = f.read(tex_names_len).decode("utf-8", "ignore").split(u"\x00")[:img_count]
+                    if not die:
+                        tex_names_len = (texture_offsets[0] - (4 * img_count + 4))
+                        texture_names = f.read(tex_names_len).decode("utf-8", "ignore").split(u"\x00")[:img_count]
+                        f.seek(start + 4 + img_count * 4)
+                    else:
+                        f.seek(die * img_count, 1)
+                        curr_off = f.tell()
+                        tex_names_len = (texture_offsets[0] - f.tell())
+                        texture_names = f.read(tex_names_len).decode("utf-8", "ignore").split(u"\x00")[:img_count]
+                        f.seek(curr_off)
+                        texture_bytes = f.read(tex_names_len)
                     texture_ends = list(texture_offsets[1:])
                     texture_ends.append(pathlib.Path(file).stat().st_size)
+
+                    if die:
+                        for file_name in self.bad_models:
+                            fn = open(str(self.folder_path / file_name), "wb")
+                            pack("<I", len(texture_names))
+                            fn.write(texture_bytes)
+                            fn.close()
+                        self.bad_models = []
 
                     for off, end, name in zip(texture_offsets, texture_ends, texture_names):
                         f.seek(off)
